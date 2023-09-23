@@ -1,0 +1,34 @@
+{
+  "name": "@luxio-lighting/cli",
+  "version": "1.0.0",
+  "description": "Luxio Command-Line Interface",
+  "main": "index.js",
+  "files": [
+    "/package.json",
+    "/README.md",
+    "/bin"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@luxio-lighting/lib": "^1.0.2",
+    "chalk": "^5.3.0",
+    "cli-table": "^0.3.11",
+    "commander": "^11.0.0",
+    "suppress-experimental-warnings": "^1.1.17",
+    "timeago.js": "^4.0.2"
+  },
+  "bin": {
+    "luxio": "bin/luxio.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luxio-lighting/luxio-cli"
+  }
+}
