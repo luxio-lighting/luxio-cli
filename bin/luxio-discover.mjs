@@ -11,13 +11,10 @@ discovery.discoverDevices()
 		let table = new Table({
 			head: [
 				'ID',
-				'Name',
-				'Version',
 				'Address',
-				'Pixels',
+				'Version',
+				'Name',
 				'Last seen',
-				'Wi-Fi SSID',
-				'Connectivity',
 			].map(str => chalk.cyan(str))
 		});
 
@@ -28,13 +25,10 @@ discovery.discoverDevices()
 		devicesArray.forEach(device => {
 			table.push([
 				device.id,
-				device.name,
-				device.version,
 				device.address,
-				device.pixels,
+				device.version,
+				device.name,
 				timeago.format(device.lastseen),
-				device.wifiSsid,
-				device.connectivity,
 			].map(prop => {
 				if (typeof prop === 'undefined' || prop === null)
 					return '-';

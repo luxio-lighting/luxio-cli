@@ -7,20 +7,23 @@ program
 	.version(Package.version)
 
 	// List devices
-	.command('devices', 'List Luxio devices on your Wi-Fi')
+	.command('discover', 'Discover Luxio devices on your Wi-Fi')
+	.command('monitor', 'Show a live view of all broadcasted events')
 
 	// Device state
 	.command('get-state', 'Get the state')
+	.command('toggle-on', 'Toggle on/off')
 	.command('set-on', 'Turn on')
 	.command('set-off', 'Turn off')
 	.command('set-brightness', 'Set the brightness')
+	.command('set-color', 'Set a color')
 	.command('set-gradient', 'Set a gradient')
 	.command('set-effect', 'Set an effect')
 	.command('set-temperature', 'Set a color temperature')
 
 	// Device settings
 	.command('set-name', 'Set the name')
-	.command('set-pixels', 'Set the pixel count')
+	.command('set-pixel-count', 'Set the pixel count')
 
 	// Wi-Fi
 	.command('get-wifi', 'Get a list of Wi-Fi networks')
