@@ -10,26 +10,27 @@ program
 	.command('discover', 'Discover Luxio devices on your Wi-Fi')
 	.command('monitor', 'Show a live view of all broadcasted events')
 
-	// Device state
-	.command('get-state', 'Get the state')
+	// Full state
+	.command('get-state', 'Get the device\'s state')
+
+	// LED
 	.command('toggle-on', 'Toggle on/off')
 	.command('set-on', 'Turn on')
 	.command('set-off', 'Turn off')
 	.command('set-brightness', 'Set the brightness')
 	.command('set-color', 'Set a color')
 	.command('set-gradient', 'Set a gradient')
-	.command('set-effect', 'Set an effect')
-	.command('set-temperature', 'Set a color temperature')
-
-	// Device settings
-	.command('set-name', 'Set the name')
-	.command('set-pixel-count', 'Set the pixel count')
+	.command('set-animation', 'Set an animation')
+	.command('set-pixel-count', 'Set the number of pixels')
 
 	// Wi-Fi
 	.command('get-wifi', 'Get a list of Wi-Fi networks')
 	.command('set-wifi', 'Set the Wi-Fi network')
 
 	// System
+	.command('ping', 'Send a ping')
+	.command('set-name', 'Set the name')
 	.command('restart', 'Restart a Luxio device')
+	.command('factory-reset', 'Factory reset a Luxio device')
 
 	.parse();

@@ -12,7 +12,7 @@ getDevices({
 			const ssid = program.getOptionValue('ssid');
 			const pass = program.getOptionValue('pass');
 
-			await device.setWifiNetwork({
+			await device.wifi.connect({
 				ssid,
 				pass,
 			})

@@ -15,7 +15,6 @@ export const error = err => {
 }
 
 export const getDevices = async ({
-	sync = false,
 	unique = false,
 } = {}) => {
 	if (unique) {
@@ -28,6 +27,8 @@ export const getDevices = async ({
 	const deviceId = program.getOptionValue('device');
 
 	const discovery = new LuxioDiscovery();
+	discovery.setDebugEnabled(process.env.LUXIO_DEBUG === '1');
+
 	return discovery.discoverDevices()
 		.then(async devices => {
 			devices = Object.values(devices);
@@ -43,12 +44,6 @@ export const getDevices = async ({
 			})
 		})
 		.then(async devices => {
-			if (sync) {
-				await Promise.all(devices.map(async device => {
-					await device.sync().catch(err => null);
-				}));
-			}
-
 			if (unique) {
 				if (Object.keys(devices).length !== 1) {
 					error(`Device not found: ${deviceId}`);

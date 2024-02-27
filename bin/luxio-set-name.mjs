@@ -7,14 +7,12 @@ getDevices({
 	unique: true,
 })
 	.then(async devices => {
-		await Promise.all(devices.map(async device => {
-			const oldName = device.name;
-			const newName = program.getOptionValue('name');
+		const name = program.getOptionValue('name');
 
-			device.name = newName;
-			device.sync()
-				.then(() => log(`✅ [${oldName}] Name → ${newName}`))
-				.catch(err => error(`❌ [${oldName}] Name → ${newName}: ${err.message}`))
+		await Promise.all(devices.map(async device => {
+			await device.system.setName({ name })
+				.then(() => log(`✅ [${device.name}] Name → ${name}`))
+				.catch(err => error(`❌ [${device.name}] Name → ${name}: ${err.message}`))
 		}));
 	})
 	.catch(error);

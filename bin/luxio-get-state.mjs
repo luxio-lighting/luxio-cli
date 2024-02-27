@@ -1,38 +1,15 @@
+import util from 'node:util';
 import { log, error, getDevices } from './helpers.mjs';
-import Table from 'cli-table';
-import chalk from 'chalk';
 
-getDevices({
-	sync: true,
-})
+getDevices()
 	.then(async devices => {
-		devices.forEach(device => {
-			log('');
-			log(chalk.bold.white(` ${device.name} (${device.id})`));
-
-			let table = new Table({
-				head: [
-					'On',
-					'Brightness',
-					'Mode',
-					'Gradient',
-					'Effect',
-					'Wi-Fi SSID',
-					'Connectivity',
-				].map(str => chalk.cyan(str))
-			});
-
-			table.push([
-				device.on ? 'Yes' : 'No',
-				`${Math.round(device.brightness * 100)}%`,
-				device.mode,
-				device.gradient ? device.gradient.join(',') : '-',
-				device.effect ? device.effect : '-',
-				device.wifi.ssid,
-				device.connectivity,
-			])
-
-			console.log(table.toString());
-		})
+		await Promise.all(devices.map(async device => {
+			try {
+				const state = await device.getFullState();
+				log(`✅ [${device.name}] Get State → ${util.inspect(state, { depth: null, colors: true })}`);
+			} catch (err) {
+				error(`❌ [${device.name}] Get State → Error: ${err.message}`);
+			}
+		}));
 	})
 	.catch(error);

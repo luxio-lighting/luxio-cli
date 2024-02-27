@@ -2,36 +2,46 @@ import Table from 'cli-table';
 import chalk from 'chalk';
 import { log, error, getDevices } from './helpers.mjs';
 
-getDevices({
-	unique: true,
-})
+getDevices()
 	.then(async devices => {
-		await devices.forEach(async device => {
-			await device.getWifiNetworks()
-				.then(networks => {
-					log('');
-					log(chalk.bold.white(` ${device.name} `));
+		await Promise.all(devices.map(async device => {
 
-					let table = new Table({
-						head: [
-							'SSID',
-							'RSSI',
-							'Security',
-						].map(str => chalk.cyan(str))
+			try {
+				await device.connect();
+				await device.wifi.scanNetworks();
+				const networks = await new Promise((resolve, reject) => {
+					device.addEventListener('wifi.networks', networks => {
+						resolve(networks);
 					});
+				});
+				await device.disconnect();
 
-					networks.forEach(network => {
-						table.push([
-							network.ssid,
-							network.rssi,
-							(typeof network.security !== 'undefined') ? network.security ? network.security : 'open' : '-',
-						]);
-					});
+				log('');
+				log(chalk.bold.white(` ${device.name} `));
+				let table = new Table({
+					head: [
+						'BSSID',
+						'SSID',
+						'RSSI',
+						'Encryption',
+					].map(str => chalk.cyan(str))
+				});
 
-					log(table.toString());
+				networks.forEach(network => {
+					table.push([
+						network.bssid,
+						network.ssid,
+						network.rssi,
+						network.encryption,
+					]);
+				});
 
-				})
-				.catch(err => error(`Could not get Wi-Fi networks: ${err.message}`));
-		})
+				log(table.toString());
+			} catch (err) {
+				log('');
+				log(chalk.bold.white(` ${device.name} `));
+				log(chalk.red(`❌ Could not get Wi-Fi networks: ${err.message}`));
+			}
+		}));
 	})
 	.catch(error);
