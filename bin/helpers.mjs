@@ -16,6 +16,7 @@ export const error = err => {
 
 export const getDevices = async ({
 	unique = false,
+	debug = null,
 } = {}) => {
 	if (unique) {
 		program.requiredOption('-d, --device <id>', 'ID or Name of the device');
@@ -27,7 +28,7 @@ export const getDevices = async ({
 	const deviceId = program.getOptionValue('device');
 
 	const discovery = new LuxioDiscovery();
-	discovery.setDebugEnabled(process.env.LUXIO_DEBUG === '1');
+	discovery.setDebugEnabled(debug ?? process.env.LUXIO_DEBUG === '1');
 
 	return discovery.discoverDevices()
 		.then(async devices => {
