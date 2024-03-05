@@ -12,8 +12,8 @@ getDevices({
 			count = parseInt(count);
 
 			await device.led.setCount({ count })
-				.then(() => log(`✅ [${device.name}] Pixel Count → ${count}`))
-				.catch(err => error(`❌ [${device.name}] Pixel Count → ${count}: ${err.message}`))
+				.then(() => log(`✅ [${device.name}] LED Count → ${count}`))
+				.catch(err => error(`❌ [${device.name}] LED Count → ${count}: ${err.message}`))
 		}));
 	})
 	.catch(error);

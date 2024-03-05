@@ -4,6 +4,7 @@ import Table from 'cli-table';
 import chalk from 'chalk';
 
 const discovery = new LuxioDiscovery();
+discovery.setDebugEnabled(true);
 discovery.discoverDevices()
 	.then(devices => {
 		const devicesArray = Object.values(devices);

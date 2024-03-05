@@ -13,7 +13,7 @@ program
 	// Full state
 	.command('get-state', 'Get the device\'s state')
 
-	// LED
+	// LED State
 	.command('toggle-on', 'Toggle on/off')
 	.command('set-on', 'Turn on')
 	.command('set-off', 'Turn off')
@@ -21,7 +21,11 @@ program
 	.command('set-color', 'Set a color')
 	.command('set-gradient', 'Set a gradient')
 	.command('set-animation', 'Set an animation')
-	.command('set-pixel-count', 'Set the number of pixels')
+
+	// LED Config
+	.command('set-led-count', 'Set the number of LEDs')
+	.command('set-led-type', 'Set the type of the LED strip')
+	.command('set-led-pin', 'Set the pin of the LED strip')
 
 	// Wi-Fi
 	.command('get-wifi', 'Get a list of Wi-Fi networks')
