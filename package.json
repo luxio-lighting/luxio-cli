@@ -1,6 +1,6 @@
 {
   "name": "@luxio-lighting/cli",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Luxio Command-Line Interface",
   "main": "index.js",
   "files": [
