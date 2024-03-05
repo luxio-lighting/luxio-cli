@@ -1,5 +1,7 @@
 # Luxio CLI (Command Line Interface)
 
+[![Node version](https://img.shields.io/npm/v/@luxio-lighting/cli.svg)](https://www.npmjs.com/package/@luxio-lighting/cli)
+
 ## Installation
 
 ```bash
