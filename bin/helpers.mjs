@@ -1,5 +1,7 @@
 import { program } from 'commander';
 import { LuxioDiscovery } from '@luxio-lighting/lib';
+import WebSocket from 'ws';
+global.WebSocket = WebSocket;
 
 export const log = (...props) => {
 	console.log(...props);
