@@ -1,5 +1,4 @@
 import { LuxioDiscovery } from '@luxio-lighting/lib';
-import * as timeago from 'timeago.js';
 import Table from 'cli-table';
 import chalk from 'chalk';
 
@@ -15,7 +14,6 @@ discovery.discoverDevices()
 				'Address',
 				'Version',
 				'Name',
-				'Last seen',
 			].map(str => chalk.cyan(str))
 		});
 
@@ -29,7 +27,6 @@ discovery.discoverDevices()
 				device.address,
 				device.version,
 				device.name,
-				timeago.format(device.lastseen),
 			].map(prop => {
 				if (typeof prop === 'undefined' || prop === null)
 					return '-';

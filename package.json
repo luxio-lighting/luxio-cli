@@ -23,7 +23,6 @@
     "commander": "^11.0.0",
     "mdns-js": "^1.0.3",
     "suppress-experimental-warnings": "^1.1.17",
-    "timeago.js": "^4.0.2",
     "ws": "^8.16.0"
   },
   "bin": {
