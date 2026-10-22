@@ -1,0 +1,37 @@
+{
+  "name": "@luxio-lighting/cli",
+  "version": "0.1.2",
+  "type": "module",
+  "description": "Discover and control Luxio lights on your local network or over UART",
+  "bin": {
+    "luxio": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "tools/materialize-dependencies.mjs"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "prepack": "npm run build",
+    "test": "npm run build && node --import tsx tools/test-cli.ts",
+    "check": "tsc --noEmit",
+    "postinstall": "node tools/materialize-dependencies.mjs"
+  },
+  "dependencies": {
+    "bonjour-service": "^1.3.0",
+    "commander": "^14.0.0",
+    "protobufjs": "^7.5.4",
+    "serialport": "^13.0.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.0",
+    "tsx": "^4.20.0",
+    "@types/node": "^24.0.0",
+    "fengari": "^0.1.4"
+  }
+}
