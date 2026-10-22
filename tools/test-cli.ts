@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { Device } from '../shared/device/src/device.js';
 import { decodeRequest, encodeResponse } from '../shared/protocol/src/index.js';
 
-const device = new Device('cli-test'); device.state.build = 5; device.state.brightness = 255;
+const device = new Device('cli-test'); device.state.build = 11; device.state.brightness = 256;
 let requests = 0;
 const server = createServer(async (request, response) => {
   const chunks: Buffer[] = [];
@@ -42,7 +42,7 @@ try {
       assert.equal(code, 1); assert.match(stderr, /six-digit/); assert.equal(requests, before, 'Invalid input must not contact the device');
     } else {
       assert.equal(code, 0, stderr); const result = JSON.parse(stdout); assert.equal(result.state.mode, entry.mode);
-      assert.equal(device.state.brightness, 255);
+      assert.equal(device.state.brightness, 256);
       if (entry.color) assert.deepEqual(Object.values(device.state.color).slice(0, 3), entry.color);
       if (entry.args[0] === 'set-gradient') {
         if (gradientId) assert.equal(device.state.activeScriptId, gradientId, 'Reuse the saved gradient');
@@ -58,4 +58,28 @@ try {
     }
     console.log(`PASS: luxio ${entry.args.join(' ')}`);
   }
+  for (let i = 0; i < 150; i++) {
+    const created = device.handle({ id: 1000 + i, operation: 7, script: { id: '', name: `Saved ${i}`, source: 'function setup() end function loop() end', mode: i % 2 ? 1 : 2 } });
+    assert.ok(created.script, created.error);
+  }
+  for (const args of [['off'], ['brightness', '1'], ['brightness', '256'], ['on'], ['brightness', '0'], ['brightness', '257']]) {
+    const child = spawn(process.execPath, ['dist/index.js', '--device', target, ...args]);
+    let stderr = ''; child.stderr.on('data', data => { stderr += data; }); child.stdout.resume();
+    const code = await new Promise<number | null>((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+    const invalid = args[1] === '0' || args[1] === '257';
+    assert.equal(code, invalid ? 1 : 0, stderr);
+    if (invalid) assert.match(stderr, /1–256/);
+    else { assert.equal(device.state.on, args[0] === 'on'); assert.equal(device.state.brightness, args[1] === '1' ? 1 : 256); }
+    console.log(`PASS: luxio ${args.join(' ')}`);
+  }
+  const before = requests;
+  const child = spawn(process.execPath, ['dist/index.js', '--device', target, 'scripts']);
+  let stdout = '', stderr = '';
+  child.stdout.on('data', data => { stdout += data; }); child.stderr.on('data', data => { stderr += data; });
+  const code = await new Promise<number | null>((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+  assert.equal(code, 0, stderr);
+  const listed = JSON.parse(stdout).scripts;
+  assert.equal(listed.length, 151); assert.equal(new Set(listed.map((script: { id: string }) => script.id)).size, 151);
+  assert.equal(requests - before, 3);
+  console.log('PASS: CLI lists all 151 saved items across three pages');
 } finally { server.close(); device.animation?.close(); }

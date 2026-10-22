@@ -31,7 +31,7 @@ async function discover() {
 }
 let resolvedTarget: string | undefined;
 let serialPort: SerialPort | undefined;
-async function send(request: Omit<Request, 'id'>) {
+async function sendPage(request: Omit<Request, 'id'>) {
   let target: string = resolvedTarget ?? program.opts().device;
   if (!target) {
     const devices = await discover();
@@ -85,6 +85,19 @@ async function send(request: Omit<Request, 'id'>) {
   }
   return requestHttp(target, message);
 }
+async function send(request: Omit<Request, 'id'>) {
+  let result = await sendPage(request);
+  if (request.operation !== 5) return result;
+  const scripts = [...result.scripts];
+  let offset = request.scriptOffset ?? 0;
+  while (result.nextScriptOffset) {
+    if (result.nextScriptOffset <= offset || !result.scripts.length) throw new Error('Invalid script listing continuation');
+    offset = result.nextScriptOffset;
+    result = await sendPage({ ...request, scriptOffset: offset });
+    scripts.push(...result.scripts);
+  }
+  return { ...result, scripts, nextScriptOffset: 0 };
+}
 program.command('discover').action(async () => console.log(JSON.stringify(await discover(), null, 2)));
 program.command('state').action(async () => console.log(JSON.stringify(await send({ operation: 0 }), null, 2)));
 program.command('set-color <hex>').alias('set').description('Set a solid RGB color, e.g. ff0000; switches to Color mode').action(async value => {
@@ -124,11 +137,13 @@ function loop() end`;
 program.command('channels').option('--red <n>', '', '0').option('--green <n>', '', '0').option('--blue <n>', '', '0')
   .option('--white <n>', '', '0').option('--warm-white <n>', '', '0').option('--cool-white <n>', '', '0')
   .action(async options => console.log(JSON.stringify(await send({ operation: 1, color: colorSchema.parse(Object.fromEntries(Object.entries(options).map(([key, value]) => [key, Number(value)]))) }), null, 2)));
-program.command('brightness <value>').description('0–255; preserves the active mode').action(async value => {
+program.command('brightness <value>').description('1–256; preserves power and the active mode').action(async value => {
   const brightness = Number(value);
-  if (!Number.isInteger(brightness) || brightness < 0 || brightness > 255) throw new Error('Brightness must be 0–255');
+  if (!Number.isInteger(brightness) || brightness < 1 || brightness > 256) throw new Error('Brightness must be 1–256');
   console.log(JSON.stringify(await send({ operation: 2, brightness }), null, 2));
 });
+program.command('on').description('Turn on without changing brightness or mode').action(async () => console.log(JSON.stringify(await send({ operation: 15, on: true }), null, 2)));
+program.command('off').description('Turn off without changing brightness or mode').action(async () => console.log(JSON.stringify(await send({ operation: 15, on: false }), null, 2)));
 program.command('config <json>').description('Full configuration as JSON').action(async value => console.log(JSON.stringify(await send({ operation: 3, config: configSchema.parse(JSON.parse(value)) }), null, 2)));
 program.command('wifi <file>').description('Read SSID/password JSON from a local file (never command-line credentials)').action(async file => {
   const wifi = JSON.parse(await readFile(file, 'utf8'));
