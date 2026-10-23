@@ -21,8 +21,8 @@ try {
     const result = JSON.parse(stdout);
     assert.equal(result.state.mode, mode); assert.equal(result.state.brightness, 16);
     if (mode === 1) {
-      if (gradientId) assert.equal(result.state.activeScriptId, gradientId);
-      gradientId = result.state.activeScriptId;
+      if (gradientId) assert.equal(result.state.activeAnimationId, gradientId);
+      gradientId = result.state.activeAnimationId;
       await new Promise(resolve => setTimeout(resolve, 700));
       const state: State = (await requestHttp(address, { id: id++, operation: 0 })).state!;
       assert.equal(state.mode, 1); assert.equal(state.activeScriptId, gradientId);

@@ -4,6 +4,7 @@ import { Bonjour } from 'bonjour-service';
 import { SerialPort } from 'serialport';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { parseParameters, updateParameters, type AnimationParameter } from '../shared/protocol/src/parameters.js';
 import { colorSchema, configSchema, decodeResponse, encodeRequest, frame, FrameDecoder, requestHttp, type Request } from '../shared/protocol/src/index.js';
 
 const program = new Command().name('luxio').description('Local control for Luxio lights').version('0.1.1')
@@ -86,80 +87,149 @@ async function sendPage(request: Omit<Request, 'id'>) {
   return requestHttp(target, message);
 }
 async function send(request: Omit<Request, 'id'>) {
-  let result = await sendPage(request);
-  if (request.operation !== 5) return result;
-  const scripts = [...result.scripts];
-  let offset = request.scriptOffset ?? 0;
-  while (result.nextScriptOffset) {
-    if (result.nextScriptOffset <= offset || !result.scripts.length) throw new Error('Invalid script listing continuation');
-    offset = result.nextScriptOffset;
-    result = await sendPage({ ...request, scriptOffset: offset });
-    scripts.push(...result.scripts);
+  if ([7, 8, 31].includes(request.operation) && request.script?.parameters?.length) {
+    const requiredBuild = /^\s*-- @parameter [^,]+,\s*(Slider|Checkbox)\s*,/m.test(request.script.source) ? 21 : 14;
+    if (((await sendPage({ operation: 0 })).state?.build ?? 0) < requiredBuild) throw new Error(`These animation parameters require firmware build ${requiredBuild} or newer`);
   }
-  return { ...result, scripts, nextScriptOffset: 0 };
+  if ([1, 17, 20, 21, 23, 27, 28, 30].includes(request.operation)) {
+    const state = (await sendPage({ operation: 0 })).state;
+    if (!state) throw new Error('Unable to read device configuration');
+    if ([17, 20, 21, 23].includes(request.operation) && state.config.ledCount <= 1) throw new Error('Gradients require more than one LED/controller');
+    let colors = request.color ? [request.color] : request.savedColor ? [request.savedColor.color] : request.gradient?.colors ?? [];
+    if (request.operation === 23) colors = (await sendPage({ operation: 19, gradientId: request.gradientId })).gradient?.colors ?? [];
+    if (request.operation === 30) { const saved = (await sendPage({ operation: 26, colorId: request.colorId })).savedColor; if (saved) colors = [saved.color]; }
+    for (const color of colors) {
+      if (color.white && state.config.stripType !== 'WS2814') throw new Error('The white channel requires an RGBW strip (WS2814)');
+      if ((color.warmWhite || color.coolWhite) && state.config.stripType !== 'WS2805') throw new Error('Warm/cool white requires an RGBCCT strip (WS2805)');
+    }
+  }
+  let result = await sendPage(request);
+  if (![5, 18, 25].includes(request.operation)) return result;
+  const listKey = request.operation === 5 ? 'scripts' : request.operation === 18 ? 'gradients' : 'colors';
+  const nextKey = request.operation === 5 ? 'nextScriptOffset' : request.operation === 18 ? 'nextGradientOffset' : 'nextColorOffset';
+  const offsetKey = request.operation === 5 ? 'scriptOffset' : request.operation === 18 ? 'gradientOffset' : 'colorOffset';
+  const items = [...(result[listKey] ?? [])];
+  let offset = request[offsetKey] ?? 0;
+  while (result[nextKey]) {
+    const next = result[nextKey]!;
+    if (next <= offset || !result[listKey]?.length) throw new Error('Invalid library listing continuation');
+    offset = next; result = await sendPage({ ...request, [offsetKey]: offset });
+    items.push(...(result[listKey] ?? []));
+  }
+  return { ...result, [listKey]: items, [nextKey]: 0 };
 }
-program.command('discover').action(async () => console.log(JSON.stringify(await discover(), null, 2)));
-program.command('state').action(async () => console.log(JSON.stringify(await send({ operation: 0 }), null, 2)));
+const outputKeys: Record<string, string> = { scripts: 'animations', script: 'animation', activeScriptId: 'activeAnimationId', scriptName: 'animationName', nextScriptOffset: 'nextAnimationOffset' };
+const outputReplacer = (_key: string, value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
+  ? Object.fromEntries(Object.entries(value).map(([key, item]) => [outputKeys[key] ?? key, item])) : value;
+program.command('discover').action(async () => console.log(JSON.stringify(await discover(), outputReplacer, 2)));
+program.command('state').action(async () => console.log(JSON.stringify(await send({ operation: 0 }), outputReplacer, 2)));
 program.command('set-color <hex>').alias('set').description('Set a solid RGB color, e.g. ff0000; switches to Color mode').action(async value => {
   const hex = value.trim().replace(/^#/, '');
   if (!/^[a-f\d]{6}$/i.test(hex)) throw new Error('Use a six-digit hex color, such as ff0000 or "#FF0000"');
-  console.log(JSON.stringify(await send({ operation: 1, color: colorSchema.parse({ red: parseInt(hex.slice(0, 2), 16), green: parseInt(hex.slice(2, 4), 16), blue: parseInt(hex.slice(4, 6), 16) }) }), null, 2));
+  console.log(JSON.stringify(await send({ operation: 1, color: colorSchema.parse({ red: parseInt(hex.slice(0, 2), 16), green: parseInt(hex.slice(2, 4), 16), blue: parseInt(hex.slice(4, 6), 16) }) }), outputReplacer, 2));
 });
 program.command('set-gradient <colors>').description('Set 2–8 comma-separated RGB colors; switches to Gradient mode').action(async value => {
   const hexes: string[] = value.split(',').map((hex: string) => hex.trim().replace(/^#/, ''));
   if (hexes.length < 2 || hexes.length > 8 || hexes.some(hex => !/^[a-f\d]{6}$/i.test(hex))) {
     throw new Error('Use 2–8 comma-separated six-digit hex colors, such as ff0000,00ff00,0000ff');
   }
-  const colors = hexes.map(hex => [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)]);
-  const state = (await send({ operation: 0 })).state;
-  if (!state || state.build < 5) throw new Error('Gradient mode requires firmware build 5 or newer');
-  const source = `function setup()
-  local stops = {${colors.map(color => `{${color.join(',')}}`).join(',')}}
-  local count = luxio_get_pixel_count()
-  for i = 0, count - 1 do
-    local position = i / math.max(count - 1, 1) * (#stops - 1)
-    local segment = math.min(math.floor(position) + 1, #stops - 1)
-    local t = position - (segment - 1)
-    local a, b = stops[segment], stops[segment + 1]
-    luxio_set_pixel_color(i,
-      math.floor(a[1] + (b[1] - a[1]) * t + 0.5),
-      math.floor(a[2] + (b[2] - a[2]) * t + 0.5),
-      math.floor(a[3] + (b[3] - a[3]) * t + 0.5), 0, 0, 0)
-  end
-end
-function loop() end`;
-  const name = 'Luxio · CLI gradient';
-  const existing = (await send({ operation: 5 })).scripts.find((script: { name: string }) => script.name === name);
-  const saved = await send({ operation: existing ? 8 : 7, script: { id: existing?.id ?? randomUUID(), name, source, mode: 1 } });
-  if (!saved.script?.id) throw new Error('Device did not return the saved gradient ID');
-  console.log(JSON.stringify(await send({ operation: 10, scriptId: saved.script.id }), null, 2));
+  const colors = hexes.map(hex => colorSchema.parse({ red: parseInt(hex.slice(0, 2), 16), green: parseInt(hex.slice(2, 4), 16), blue: parseInt(hex.slice(4, 6), 16) }));
+  console.log(JSON.stringify(await send({ operation: 17, gradient: { id: '', name: '', colors } }), outputReplacer, 2));
 });
+program.command('set-animation <file>').description('Play a Lua animation from RAM without saving it on the device').option('--parameters <json>', 'Parameter values by name').action(async (file, options) => {
+  const source = await readFile(file, 'utf8');
+  if (!source.length || Buffer.byteLength(source) > 16384) throw new Error('Animation must contain 1–16384 bytes');
+  let parameters = parseParameters(source);
+  if (options.parameters) {
+    const values = JSON.parse(options.parameters);
+    if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Parameters must be a JSON object');
+    parameters = updateParameters(parameters, Object.entries(values).map(([name, value]) => {
+      const parameter = parameters.find(p => p.name === name);
+      if (!parameter || typeof value !== (parameter.boolean ? 'boolean' : 'number')) throw new Error(`Invalid parameter: ${name}`);
+      return { ...parameter, value: typeof value === 'boolean' ? Number(value) : value as number };
+    }));
+  }
+  console.log(JSON.stringify(await send({ operation: 31, script: { id: '', name: file.split('/').pop(), source, mode: 2, parameters } }), outputReplacer, 2));
+});
+program.command('colors').action(async () => console.log(JSON.stringify(await send({ operation: 25 }), outputReplacer, 2)));
+program.command('gradients').action(async () => console.log(JSON.stringify(await send({ operation: 18 }), outputReplacer, 2)));
+program.command('save-color <name> <hex>').option('--id <uuid>', 'Update an existing color').action(async (name, value, options) => {
+  const hex = value.trim().replace(/^#/, '');
+  if (!/^[a-f\d]{6}$/i.test(hex)) throw new Error('Use a six-digit hex color');
+  if (!name.trim() || Buffer.byteLength(name.trim()) > 63) throw new Error('Name must contain 1–63 bytes');
+  const color = colorSchema.parse({ red: parseInt(hex.slice(0, 2), 16), green: parseInt(hex.slice(2, 4), 16), blue: parseInt(hex.slice(4, 6), 16) });
+  console.log(JSON.stringify(await send({ operation: options.id ? 28 : 27, savedColor: { id: options.id ?? '', name: name.trim(), color } }), outputReplacer, 2));
+});
+program.command('save-gradient <name> <colors>').option('--id <uuid>', 'Update an existing gradient').action(async (name, value, options) => {
+  const hexes: string[] = value.split(',').map((hex: string) => hex.trim().replace(/^#/, ''));
+  if (hexes.length < 2 || hexes.length > 8 || hexes.some(hex => !/^[a-f\d]{6}$/i.test(hex))) throw new Error('Use 2–8 comma-separated six-digit hex colors');
+  if (!name.trim() || Buffer.byteLength(name.trim()) > 63) throw new Error('Name must contain 1–63 bytes');
+  const colors = hexes.map(hex => colorSchema.parse({ red: parseInt(hex.slice(0, 2), 16), green: parseInt(hex.slice(2, 4), 16), blue: parseInt(hex.slice(4, 6), 16) }));
+  console.log(JSON.stringify(await send({ operation: options.id ? 21 : 20, gradient: { id: options.id ?? '', name: name.trim(), colors } }), outputReplacer, 2));
+});
+program.command('get-color <id>').action(async colorId => console.log(JSON.stringify(await send({ operation: 26, colorId }), outputReplacer, 2)));
+program.command('get-gradient <id>').action(async gradientId => console.log(JSON.stringify(await send({ operation: 19, gradientId }), outputReplacer, 2)));
+program.command('delete-color <id>').action(async colorId => console.log(JSON.stringify(await send({ operation: 29, colorId }), outputReplacer, 2)));
+program.command('delete-gradient <id>').action(async gradientId => console.log(JSON.stringify(await send({ operation: 22, gradientId }), outputReplacer, 2)));
+program.command('run-color <id>').action(async colorId => console.log(JSON.stringify(await send({ operation: 30, colorId }), outputReplacer, 2)));
+program.command('run-gradient <id>').action(async gradientId => console.log(JSON.stringify(await send({ operation: 23, gradientId }), outputReplacer, 2)));
 program.command('channels').option('--red <n>', '', '0').option('--green <n>', '', '0').option('--blue <n>', '', '0')
   .option('--white <n>', '', '0').option('--warm-white <n>', '', '0').option('--cool-white <n>', '', '0')
-  .action(async options => console.log(JSON.stringify(await send({ operation: 1, color: colorSchema.parse(Object.fromEntries(Object.entries(options).map(([key, value]) => [key, Number(value)]))) }), null, 2)));
+  .action(async options => console.log(JSON.stringify(await send({ operation: 1, color: colorSchema.parse(Object.fromEntries(Object.entries(options).map(([key, value]) => [key, Number(value)]))) }), outputReplacer, 2)));
 program.command('brightness <value>').description('1–256; preserves power and the active mode').action(async value => {
   const brightness = Number(value);
   if (!Number.isInteger(brightness) || brightness < 1 || brightness > 256) throw new Error('Brightness must be 1–256');
-  console.log(JSON.stringify(await send({ operation: 2, brightness }), null, 2));
+  console.log(JSON.stringify(await send({ operation: 2, brightness }), outputReplacer, 2));
 });
-program.command('on').description('Turn on without changing brightness or mode').action(async () => console.log(JSON.stringify(await send({ operation: 15, on: true }), null, 2)));
-program.command('off').description('Turn off without changing brightness or mode').action(async () => console.log(JSON.stringify(await send({ operation: 15, on: false }), null, 2)));
-program.command('config <json>').description('Full configuration as JSON').action(async value => console.log(JSON.stringify(await send({ operation: 3, config: configSchema.parse(JSON.parse(value)) }), null, 2)));
+program.command('on').description('Turn on without changing brightness or mode').action(async () => console.log(JSON.stringify(await send({ operation: 15, on: true }), outputReplacer, 2)));
+program.command('off').description('Turn off without changing brightness or mode').action(async () => console.log(JSON.stringify(await send({ operation: 15, on: false }), outputReplacer, 2)));
+program.command('config <json>').description('Full configuration as JSON').action(async value => console.log(JSON.stringify(await send({ operation: 3, config: configSchema.parse(JSON.parse(value)) }), outputReplacer, 2)));
 program.command('wifi <file>').description('Read SSID/password JSON from a local file (never command-line credentials)').action(async file => {
   const wifi = JSON.parse(await readFile(file, 'utf8'));
   if (typeof wifi.ssid !== 'string' || typeof wifi.password !== 'string') throw new Error('Expected ssid and password');
   await send({ operation: 4, wifi }); console.log('Wi-Fi configuration saved');
 });
-program.command('scripts').action(async () => console.log(JSON.stringify(await send({ operation: 5 }), null, 2)));
-program.command('upload <file>').option('--name <name>', 'Script name').option('--id <uuid>', 'Update an existing script without changing its ID').action(async (file, options) => {
+program.command('animations').description('List saved animations').action(async () => console.log(JSON.stringify(await send({ operation: 5 }), outputReplacer, 2)));
+program.command('save-animation <file>').alias('upload').description('Save a Lua animation on the device').option('--name <name>', 'Animation name').option('--parameters <json>', 'Parameter values by name').option('--id <uuid>', 'Update an existing animation without changing its ID').action(async (file, options) => {
   const source = await readFile(file, 'utf8');
-  console.log(JSON.stringify(await send({ operation: options.id ? 8 : 7, script: { id: options.id ?? randomUUID(), name: options.name ?? file.split('/').pop(), source } }), null, 2));
+  let parameters = parseParameters(source);
+  if (options.parameters) {
+    const values = JSON.parse(options.parameters);
+    if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Parameters must be a JSON object');
+    parameters = updateParameters(parameters, Object.entries(values).map(([name, value]) => {
+      const parameter = parameters.find(p => p.name === name);
+      if (!parameter || typeof value !== (parameter.boolean ? 'boolean' : 'number')) throw new Error(`Invalid parameter: ${name}`);
+      return { ...parameter, value: typeof value === 'boolean' ? Number(value) : value as number };
+    }));
+  }
+  console.log(JSON.stringify(await send({ operation: options.id ? 8 : 7, script: { id: options.id ?? randomUUID(), name: options.name ?? file.split('/').pop(), source, parameters } }), outputReplacer, 2));
 });
-program.command('get-script <id>').action(async scriptId => console.log((await send({ operation: 6, scriptId })).script?.source));
-program.command('delete-script <id>').action(async scriptId => console.log(JSON.stringify(await send({ operation: 9, scriptId }), null, 2)));
-program.command('run <id>').action(async scriptId => console.log(JSON.stringify(await send({ operation: 10, scriptId }), null, 2)));
-program.command('stop').action(async () => console.log(JSON.stringify(await send({ operation: 11 }), null, 2)));
-program.command('pairing').action(async () => console.log(JSON.stringify(await send({ operation: 12 }), null, 2)));
+program.command('set-parameters <json>').description('Change active animation parameters without restarting').option('--save', 'Also save values with the active saved animation').action(async (json, options) => {
+  const values = JSON.parse(json);
+  if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Parameters must be a JSON object');
+  const state = (await send({ operation: 0 })).state;
+  if (!state || state.mode !== 2) throw new Error('No animation is running');
+  if (state.build < 14) throw new Error('Animation parameters require firmware build 14 or newer');
+  if (options.save && !state.activeScriptId) throw new Error('Save the animation before saving parameter values');
+  const definitions: AnimationParameter[] = state.parameters ?? [];
+  const parameters = updateParameters(definitions, Object.entries(values).map(([name, value]) => {
+    const parameter = definitions.find(p => p.name === name);
+    if (!parameter || typeof value !== (parameter.boolean ? 'boolean' : 'number')) throw new Error(`Invalid parameter: ${name}`);
+    return { ...parameter, value: typeof value === 'boolean' ? Number(value) : value as number };
+  }));
+  const result = await send({ operation: 32, scriptId: state.activeScriptId || undefined, script: state.activeScriptId ? undefined : { id: '', name: state.scriptName ?? '', source: '' }, parameters });
+  if (options.save) {
+    const animation = (await send({ operation: 6, scriptId: state.activeScriptId })).script;
+    if (!animation) throw new Error('Animation not found');
+    await send({ operation: 8, script: { ...animation, parameters } });
+  }
+  console.log(JSON.stringify(result, outputReplacer, 2));
+});
+program.command('get-animation <id>').description('Read a saved animation’s Lua source').action(async scriptId => console.log((await send({ operation: 6, scriptId })).script?.source));
+program.command('delete-animation <id>').description('Delete a saved animation').action(async scriptId => console.log(JSON.stringify(await send({ operation: 9, scriptId }), outputReplacer, 2)));
+program.command('run-animation <id>').alias('run').description('Play a saved animation').action(async scriptId => console.log(JSON.stringify(await send({ operation: 10, scriptId }), outputReplacer, 2)));
+program.command('stop').action(async () => { const state = (await send({ operation: 0 })).state; console.log(JSON.stringify(await send({ operation: state?.mode === 1 ? 24 : 11 }), outputReplacer, 2)); });
+program.command('pairing').action(async () => console.log(JSON.stringify(await send({ operation: 12 }), outputReplacer, 2)));
 program.command('check-update').description('Check for updates without installing').action(async () => {
   let result = await send({ operation: 13 });
   for (let attempt = 0; result.updateChecking && attempt < 45; attempt++) {
@@ -168,7 +238,7 @@ program.command('check-update').description('Check for updates without installin
   }
   if (result.updateChecking) throw new Error('Update check timed out');
   if (result.updateError) throw new Error(result.updateError);
-  console.log(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result, outputReplacer, 2));
 });
 program.command('update').description('Manually install the checked update; the device goes offline during recovery').action(async () => {
   await send({ operation: 14 });
