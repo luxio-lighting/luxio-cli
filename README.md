@@ -73,3 +73,7 @@ Animations can declare a palette hint in their leading comments, for example
 `-- @preview ff460c,d21400,ffc823` (two to eight RGB hex colors). `set-animation`
 and animation saves preserve this comment; firmware build 19 derives the preview
 for device state and library listings. The hint does not alter LED rendering.
+
+## Publishing
+
+GitHub Actions publishes tags matching `cli-v*`; the same workflow can be run manually to retry an unpublished version. Configure npm trusted publishing for organization `luxio-lighting`, repository `luxio-cli`, workflow `publish-cli.yml`, environment `npm`, allowing direct `npm publish`. A publish-capable `NPM_TOKEN` repository secret is also supported. The source repository is private, so the workflow does not request public-source provenance.
