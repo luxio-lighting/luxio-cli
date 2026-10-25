@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { parseParameters, updateParameters, type AnimationParameter } from '../shared/protocol/src/parameters.js';
 import { colorSchema, configSchema, decodeResponse, encodeRequest, frame, FrameDecoder, requestHttp, type Request } from '../shared/protocol/src/index.js';
 
-const program = new Command().name('luxio').description('Local control for Luxio lights').version('0.1.1')
+const program = new Command().name('luxio').description('Local control for Luxio lights').version('3.0.0')
   .option('--device <name-or-address>', 'Device name, LAN address, or serial path', process.env.LUXIO_DEVICE)
   .option('--api <url>', 'Discovery API', process.env.LUXIO_API_URL ?? 'https://api.luxio.lighting');
 async function discover() {
@@ -99,7 +99,7 @@ async function send(request: Omit<Request, 'id'>) {
     if (request.operation === 23) colors = (await sendPage({ operation: 19, gradientId: request.gradientId })).gradient?.colors ?? [];
     if (request.operation === 30) { const saved = (await sendPage({ operation: 26, colorId: request.colorId })).savedColor; if (saved) colors = [saved.color]; }
     for (const color of colors) {
-      if (color.white && state.config.stripType !== 'WS2814') throw new Error('The white channel requires an RGBW strip (WS2814)');
+      if (color.white && !['WS2814', 'SK6812'].includes(state.config.stripType)) throw new Error('The white channel requires an RGBW strip (WS2814 or SK6812)');
       if ((color.warmWhite || color.coolWhite) && state.config.stripType !== 'WS2805') throw new Error('Warm/cool white requires an RGBCCT strip (WS2805)');
     }
   }

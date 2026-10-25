@@ -51,12 +51,18 @@ message Color {
   uint32 warm_white = 5;
   uint32 cool_white = 6;
 }
+// Omitted feature settings retain their current value. Both default enabled.
+message RelayConfig { bool enabled = 1; uint32 gpio = 2; bool inverted = 3; }
+message FeatureConfig { bool enabled = 1; }
 message Config {
   string name = 1;
   string strip_type = 2;
   uint32 led_count = 3;
   uint32 gpio = 4;
   uint32 channel = 5;
+  RelayConfig relay = 6;
+  FeatureConfig wifi = 7;
+  FeatureConfig matter = 8;
 }
 message Wifi { string ssid = 1; string password = 2; }
 message WifiNetwork { string ssid = 1; sint32 rssi = 2; bool password_required = 3; }

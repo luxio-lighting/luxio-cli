@@ -1,5 +1,7 @@
 # Luxio CLI
 
+Version 3 uses the current Luxio Protobuf protocol and requires Node.js 22+. It replaces the v2 CLI command surface; run `luxio --help` after upgrading.
+
 Standalone TypeScript CLI with local protocol source and command tests. Node.js 22 or newer is required.
 
 ```sh
@@ -45,7 +47,7 @@ luxio run-animation <uuid>
 
 `save-color`, `save-gradient`, and `save-animation` accept `--id <uuid>` to update an existing item. `get-color`, `get-gradient`, `get-animation`, and the matching `delete-*` commands address each library independently. `stop` stops the active gradient or animation; `off` changes power. Colors and gradients use native data, not generated Lua.
 
-Gradient creation and playback require more than one LED/controller. The CLI checks device capabilities before changing output: `--white` requires WS2814 (RGBW), while `--warm-white` and `--cool-white` require WS2805 (RGBCCT). WS2812 supports RGB only.
+Gradient creation and playback require more than one LED/controller. The CLI checks device capabilities before changing output: `--white` requires WS2814 or SK6812 (RGBW), while `--warm-white` and `--cool-white` require WS2805 (RGBCCT). WS2812 supports RGB only.
 
 Animation commands use `animation` terminology, including JSON fields such as `animations`, `animation`, and `activeAnimationId`. `upload` and `run` remain aliases for `save-animation` and `run-animation`. Lua files keep their `.lua` extension.
 

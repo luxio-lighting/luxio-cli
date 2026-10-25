@@ -1,6 +1,6 @@
 {
   "name": "@luxio-lighting/cli",
-  "version": "0.1.2",
+  "version": "3.0.0",
   "type": "module",
   "description": "Discover and control Luxio lights on your local network or over UART",
   "bin": {
