@@ -5,12 +5,13 @@ option java_multiple_files = true;
 
 enum Operation {
   GET_STATE = 0;
+  FACTORY_RESET = 33; // Requires factory_reset_confirmed; acknowledges before reboot and erasure.
   SET_COLOR = 1;
   SET_BRIGHTNESS = 2;
   SET_CONFIG = 3;
   SET_WIFI = 4;
   LIST_SCRIPTS = 5;
-  GET_SCRIPT = 6;
+  GET_SCRIPT = 6; // Empty script_id returns the running animation source and current parameters.
   CREATE_SCRIPT = 7;
   UPDATE_SCRIPT = 8;
   DELETE_SCRIPT = 9;
@@ -51,8 +52,10 @@ message Color {
   uint32 warm_white = 5;
   uint32 cool_white = 6;
 }
-// Omitted feature settings retain their current value. Both default enabled.
+// An absent relay leaves existing settings unchanged in SET_CONFIG.
+// Send enabled=false explicitly to disable it. Older saved configs default off.
 message RelayConfig { bool enabled = 1; uint32 gpio = 2; bool inverted = 3; }
+// Omitted feature settings retain their current value. Both default enabled.
 message FeatureConfig { bool enabled = 1; }
 message Config {
   string name = 1;
@@ -76,8 +79,8 @@ message AnimationParameter {
   bool number_input = 7; // Numeric input instead of a slider; absent on older firmware.
 }
 message Script {
-  repeated Color preview = 6;
- string id = 1; string name = 2; string source = 3; Mode mode = 4; repeated AnimationParameter parameters = 5; }
+  repeated Color preview = 6; // Derived from -- @preview RGB hex colors; display hint only.
+  string id = 1; string name = 2; string source = 3; Mode mode = 4; repeated AnimationParameter parameters = 5; }
 message Gradient {
   string id = 1;
   string name = 2;
@@ -86,8 +89,11 @@ message Gradient {
 }
 message SavedColor { string id = 1; string name = 2; Color color = 3; }
 message State {
-  repeated Color animation_preview = 15;
-
+  repeated string supported_strip_types = 19; // Types accepted by this firmware in SET_CONFIG.
+  bool factory_reset_supported = 18;
+  bool matter_disabled = 17; // True when Matter is unavailable in this build or disabled by its RAM check; absent in older Matter-enabled firmware.
+  uint32 animation_revision = 16; // Changes whenever an animation starts, including RAM-only replacements.
+  repeated Color animation_preview = 15; // Active animation hint, including RAM-only animations.
   string device_id = 1;
   uint32 build = 2;
   Config config = 3;
@@ -104,6 +110,7 @@ message State {
   string script_name = 13; // Display name for the active animation, saved or in-memory.
 }
 message Request {
+  bool factory_reset_confirmed = 18;
   uint32 id = 1;
   Operation operation = 2;
   Color color = 3;
@@ -134,8 +141,14 @@ message NetworkStatus {
   uint32 internal_largest_block = 8;
   uint32 disconnect_count = 9;
   uint32 last_disconnect_reason = 10;
+  string ssid = 11;
+  string gateway = 12;
+  repeated string dns = 13;
+  uint32 psram_size = 14; // Successfully initialized external RAM, in bytes.
+  uint32 psram_free = 15;
 }
 message Response {
+  bool factory_reset_accepted = 23;
   uint32 id = 1;
   string error = 2;
   State state = 3;
