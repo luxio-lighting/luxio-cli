@@ -16,7 +16,7 @@
   "scripts": {
     "build": "node tools/build.mjs",
     "prepack": "npm run build",
-    "test": "npm run test:bulk && npm run build && node --import tsx tools/test-cli.ts",
+    "test": "npm run test:bulk && npm run build && node --import tsx tools/test-cli.ts && node --import tsx tools/test-cli-multiple.ts",
     "check": "tsc --noEmit",
     "postinstall": "node tools/materialize-dependencies.mjs",
     "test:bulk": "node --import tsx tools/test-bulk-api.ts"

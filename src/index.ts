@@ -7,8 +7,29 @@ import { randomUUID } from 'node:crypto';
 import { parseParameters, updateParameters, type AnimationParameter } from '../shared/protocol/src/parameters.js';
 import { colorSchema, configSchema, decodeResponse, encodeRequest, frame, FrameDecoder, requestHttp, type Request } from '../shared/protocol/src/index.js';
 
-const program = new Command().name('luxio').description('Local control for Luxio lights').version('3.0.0')
-  .option('--device <name-or-address>', 'Device name, LAN address, or serial path', process.env.LUXIO_DEVICE)
+class DeviceCommand extends Command {
+  override createCommand(name: string): DeviceCommand { return new DeviceCommand(name); }
+  override action(handler: (...args: any[]) => void | Promise<void>): this {
+    return super.action(async (...args) => {
+      if (program.opts().device !== '*' || this.name() === 'discover') return handler.apply(this, args);
+      const devices = await discover();
+      if (!devices.length) throw new Error('No lights found');
+      // Run the whole action per device so reads, validation, pagination and writes stay together.
+      for (const device of devices) {
+        resolvedTarget = device.address;
+        console.log(`[${device.name} (${device.deviceId}) — ${device.address}]`);
+        try { await handler.apply(this, args); }
+        catch (error) {
+          console.error(`[${device.name} (${device.deviceId}) — ${device.address}] ${error instanceof Error ? error.message : error}`);
+          process.exitCode = 1;
+        } finally { resolvedTarget = undefined; }
+      }
+    });
+  }
+}
+
+const program = new DeviceCommand().name('luxio').description('Local control for Luxio lights').version('3.0.0')
+  .option('--device <name-or-address>', 'Device name, LAN address, serial path, or "*" for all discovered devices', process.env.LUXIO_DEVICE)
   .option('--api <url>', 'Discovery API', process.env.LUXIO_API_URL ?? 'https://api.luxio.lighting');
 async function discover() {
   const found = new Map<string, { name: string; address: string; deviceId: string; source: string }>();
@@ -122,7 +143,7 @@ const outputKeys: Record<string, string> = { scripts: 'animations', script: 'ani
 const outputReplacer = (_key: string, value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
   ? Object.fromEntries(Object.entries(value).map(([key, item]) => [outputKeys[key] ?? key, item])) : value;
 program.command('discover').action(async () => console.log(JSON.stringify(await discover(), outputReplacer, 2)));
-program.command('state').action(async () => console.log(JSON.stringify(await send({ operation: 0 }), outputReplacer, 2)));
+program.command('state').description('Device state').command('get').action(async () => console.log(JSON.stringify(await send({ operation: 0 }), outputReplacer, 2)));
 program.command('set-color <hex>').alias('set').description('Set a solid RGB color, e.g. ff0000; switches to Color mode').action(async value => {
   const hex = value.trim().replace(/^#/, '');
   if (!/^[a-f\d]{6}$/i.test(hex)) throw new Error('Use a six-digit hex color, such as ff0000 or "#FF0000"');
@@ -176,17 +197,85 @@ program.command('run-gradient <id>').action(async gradientId => console.log(JSON
 program.command('channels').option('--red <n>', '', '0').option('--green <n>', '', '0').option('--blue <n>', '', '0')
   .option('--white <n>', '', '0').option('--warm-white <n>', '', '0').option('--cool-white <n>', '', '0')
   .action(async options => console.log(JSON.stringify(await send({ operation: 1, color: colorSchema.parse(Object.fromEntries(Object.entries(options).map(([key, value]) => [key, Number(value)]))) }), outputReplacer, 2)));
-program.command('brightness <value>').description('1–256; preserves power and the active mode').action(async value => {
-  const brightness = Number(value);
-  if (!Number.isInteger(brightness) || brightness < 1 || brightness > 256) throw new Error('Brightness must be 1–256');
+const brightnessCommand = program.command('brightness').description('Brightness percentage');
+brightnessCommand.command('get').description('Read brightness rounded to the nearest whole percent').action(async () => {
+  const state = (await send({ operation: 0 })).state;
+  if (!state) throw new Error('Unable to read device state');
+  console.log(`${Math.max(1, Math.round(state.brightness * 100 / 256))}%`);
+});
+brightnessCommand.command('set <percentage>').description('1%–100%, e.g. 85%; preserves power and the active mode').action(async value => {
+  const percentage = Number(value.slice(0, -1));
+  if (!/^\d+(?:\.\d+)?%$/.test(value) || percentage < 1 || percentage > 100) throw new Error('Brightness must be 1%–100%, e.g. 85%');
+  const brightness = Math.round(percentage * 256 / 100);
   console.log(JSON.stringify(await send({ operation: 2, brightness }), outputReplacer, 2));
 });
-program.command('on').description('Turn on without changing brightness or mode').action(async () => console.log(JSON.stringify(await send({ operation: 15, on: true }), outputReplacer, 2)));
-program.command('off').description('Turn off without changing brightness or mode').action(async () => console.log(JSON.stringify(await send({ operation: 15, on: false }), outputReplacer, 2)));
-program.command('config <json>').description('Full configuration as JSON').action(async value => console.log(JSON.stringify(await send({ operation: 3, config: configSchema.parse(JSON.parse(value)) }), outputReplacer, 2)));
-program.command('wifi <file>').description('Read SSID/password JSON from a local file (never command-line credentials)').action(async file => {
+const onCommand = program.command('on').description('Power state');
+onCommand.command('get').action(async () => {
+  const state = (await send({ operation: 0 })).state;
+  if (!state) throw new Error('Unable to read device state');
+  console.log(state.on);
+});
+onCommand.command('set <value>').description('true|1|yes or false|0|no; preserves brightness and mode').action(async value => {
+  if (!['true', '1', 'yes', 'false', '0', 'no'].includes(value)) throw new Error('Power must be true|1|yes or false|0|no');
+  console.log(JSON.stringify(await send({ operation: 15, on: ['true', '1', 'yes'].includes(value) }), outputReplacer, 2));
+});
+const configCommand = program.command('config').description('Read or change individual configuration fields');
+configCommand.command('get').description('Read the full configuration').action(async () => {
+  const state = (await send({ operation: 0 })).state;
+  if (!state) throw new Error('Unable to read device configuration');
+  console.log(JSON.stringify(state.config, null, 2));
+});
+for (const [name, key] of [['name', 'name'], ['type', 'stripType'], ['led-count', 'ledCount'], ['gpio', 'gpio'], ['channel', 'channel']] as const) {
+  const fieldCommand = configCommand.command(name);
+  fieldCommand.command('get').action(async () => {
+    const state = (await send({ operation: 0 })).state;
+    if (!state) throw new Error('Unable to read device configuration');
+    console.log(state.config[key]);
+  });
+  fieldCommand.command('set <value>').action(async value => {
+    const parsed = configSchema.shape[key].parse(key === 'name' || key === 'stripType' ? value : /^\d+$/.test(value) ? Number(value) : NaN);
+    const state = (await send({ operation: 0 })).state;
+    if (!state) throw new Error('Unable to read device configuration');
+    const config = configSchema.parse({ ...state.config, [key]: parsed });
+    console.log(JSON.stringify(await send({ operation: 3, config }), outputReplacer, 2));
+  });
+}
+for (const key of ['relay', 'wifi', 'matter'] as const) {
+  const featureCommand = configCommand.command(key);
+  for (const field of key === 'relay' ? ['enabled', 'gpio', 'inverted'] as const : ['enabled'] as const) {
+    const fieldCommand = featureCommand.command(field);
+    fieldCommand.command('get').action(async () => {
+      const state = (await send({ operation: 0 })).state;
+      if (!state) throw new Error('Unable to read device configuration');
+      // Older firmware omits these settings; defaults match firmware behavior.
+      const settings = state.config[key] ?? (key === 'relay' ? { enabled: false, gpio: 0, inverted: false } : { enabled: true });
+      console.log(settings[field]);
+    });
+    fieldCommand.command('set <value>').action(async value => {
+      let parsed: number | boolean;
+      if (field === 'gpio') {
+        parsed = configSchema.shape.gpio.parse(/^\d+$/.test(value) ? Number(value) : NaN);
+      } else {
+        if (!['true', '1', 'yes', 'false', '0', 'no'].includes(value)) throw new Error('Value must be true|1|yes or false|0|no');
+        parsed = ['true', '1', 'yes'].includes(value);
+      }
+      const state = (await send({ operation: 0 })).state;
+      if (!state) throw new Error('Unable to read device configuration');
+      const settings = state.config[key] ?? (key === 'relay' ? { enabled: false, gpio: 0, inverted: false } : { enabled: true });
+      const config = configSchema.parse({ ...state.config, [key]: { ...settings, [field]: parsed } });
+      console.log(JSON.stringify(await send({ operation: 3, config }), outputReplacer, 2));
+    });
+  }
+}
+const wifiCommand = program.command('wifi').description('Wi-Fi connection');
+wifiCommand.command('get').description('Read connection details (passwords are not exposed)').action(async () => {
+  const result = await send({ operation: 0 });
+  if (!result.state) throw new Error('Unable to read device state');
+  console.log(JSON.stringify({ lanIp: result.state.lanIp, ...result.networkStatus }, null, 2));
+});
+wifiCommand.command('set <file>').description('Read SSID/password JSON from a local file (never command-line credentials)').action(async file => {
   const wifi = JSON.parse(await readFile(file, 'utf8'));
-  if (typeof wifi.ssid !== 'string' || typeof wifi.password !== 'string') throw new Error('Expected ssid and password');
+  if (!wifi || typeof wifi.ssid !== 'string' || typeof wifi.password !== 'string') throw new Error('Expected ssid and password');
   await send({ operation: 4, wifi }); console.log('Wi-Fi configuration saved');
 });
 program.command('animations').description('List saved animations').action(async () => console.log(JSON.stringify(await send({ operation: 5 }), outputReplacer, 2)));
@@ -204,7 +293,7 @@ program.command('save-animation <file>').alias('upload').description('Save a Lua
   }
   console.log(JSON.stringify(await send({ operation: options.id ? 8 : 7, script: { id: options.id ?? randomUUID(), name: options.name ?? file.split('/').pop(), source, parameters } }), outputReplacer, 2));
 });
-program.command('set-parameters <json>').description('Change active animation parameters without restarting').option('--save', 'Also save values with the active saved animation').action(async (json, options) => {
+program.command('animation-set-parameters <json>').description('Change active animation parameters without restarting').option('--save', 'Also save values with the active saved animation').action(async (json, options) => {
   const values = JSON.parse(json);
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Parameters must be a JSON object');
   const state = (await send({ operation: 0 })).state;
@@ -228,9 +317,9 @@ program.command('set-parameters <json>').description('Change active animation pa
 program.command('get-animation <id>').description('Read a saved animation’s Lua source').action(async scriptId => console.log((await send({ operation: 6, scriptId })).script?.source));
 program.command('delete-animation <id>').description('Delete a saved animation').action(async scriptId => console.log(JSON.stringify(await send({ operation: 9, scriptId }), outputReplacer, 2)));
 program.command('run-animation <id>').alias('run').description('Play a saved animation').action(async scriptId => console.log(JSON.stringify(await send({ operation: 10, scriptId }), outputReplacer, 2)));
-program.command('stop').action(async () => { const state = (await send({ operation: 0 })).state; console.log(JSON.stringify(await send({ operation: state?.mode === 1 ? 24 : 11 }), outputReplacer, 2)); });
-program.command('pairing').action(async () => console.log(JSON.stringify(await send({ operation: 12 }), outputReplacer, 2)));
-program.command('check-update').description('Check for updates without installing').action(async () => {
+program.command('matter').description('Matter commissioning').command('get-pair-code').action(async () => console.log(JSON.stringify(await send({ operation: 12 }), outputReplacer, 2)));
+const updateCommand = program.command('update').description('Firmware updates');
+updateCommand.command('get').description('Check for updates without installing').action(async () => {
   let result = await send({ operation: 13 });
   for (let attempt = 0; result.updateChecking && attempt < 45; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -240,7 +329,7 @@ program.command('check-update').description('Check for updates without installin
   if (result.updateError) throw new Error(result.updateError);
   console.log(JSON.stringify(result, outputReplacer, 2));
 });
-program.command('update').description('Manually install the checked update; the device goes offline during recovery').action(async () => {
+updateCommand.command('install').description('Manually install the checked update; the device goes offline during recovery').action(async () => {
   await send({ operation: 14 });
   console.log('Update requested. Keep the device powered on while recovery downloads and installs the firmware.');
 });
